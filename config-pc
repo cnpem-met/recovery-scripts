@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# sourcing config file to read configuration parameters
+. parameters.config
+
+#############################
+# installing general packages
+#############################
+sudo su
+apt update
+apt install nano wget python3 git -y
+
+############################################
+# mount repository directory in system files
+############################################
+mkdir /mnt/repo-concrete /mnt/repo-HLS
+# create sambas's credential file
+echo "username=$usr\npassword=%pw" | tee /root/.smbcredentials
+# seting mount config file
+echo "$path-repo-hls /mnt/repo-HLS      cifs    credentials=/root/.smbcredentials,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777,vers=1.0 0 0" | tee -a /etc/fstab
+echo "$path-repo-concrete /mnt/repo-concrete      cifs    credentials=/root/.smbcredentials,nounix,iocharset=utf8,file_mode=0777,dir_mode=0777,vers=1.0 0 0" | tee -a /etc/fstab
+# mount
+mount -a
+# soft link to a more accesible dir
+mkdir /usr/data
+ln -s /mnt/repo-hls /usr/data/repo-hls
+ln -s /mnt/repo-concrete /usr/data/repo-concrete
+
+####################################################################
+#  fix unicasting epics problem when running multiple IOCs on a host
+####################################################################
+cp  fix-epics-broadcasting /etc/NetworkManager/dispatcher.d
+chmod +x /etc/NetworkManager/dispatcher.d/fix-epics-broadcasting
+
+######################################
+# installing docker and docker-compose
+######################################
+# docker
+
+apt update
+# remove old versions of Docker if they were installed
+apt remove docker docker-engine docker.io containerd runc
+# install dependencies
+apt install apt-transport-https ca-certificates curl gnupg lsb-release
+# add repositorys key
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian \ $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+# install docker engine
+apt install docker-ce docker-ce-cli containerd.io -y
+# creates a docker user group and add current user to it
+# so the user can run docker cli without sudo
+groupadd docker
+usermod -aG docker $USER
+newgrp docker
+# configure to start Docker on boot
+systemctl enable docker.service
+systemctl enable containerd.service
+
+# docker-compose
+
+# installing dependencies
+apt install py-pip python3-dev libffi-dev openssl-dev gcc libc-dev rust cargo make -y
+# creating executable
+curl -L "https://github.com/docker/compose/releases/download/1.28.5/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+
+#############################################################
+# cloning updated docker images from github and building then
+#############################################################
+# cloning
+cd /usr/
+git clone https://github.com/lnls-gam/docker-scripts
+# building images in the right order once they depend on the first (debian9+epics+synapps)
+cd debian9-synapps6
+docker build --tag debian9-epics .
+cd ../monitoring
+# build and run containers
+docker-compose build -p monitoring up -d --build
+
+

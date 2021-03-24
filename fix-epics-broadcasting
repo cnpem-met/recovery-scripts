@@ -1,0 +1,24 @@
+#!/bin/sh -e
+
+interface=$1
+action=$2
+
+PORT=5064
+
+[ "$interface" = "enp1s0" ] || exit 0
+[ "$action" = "up" -o "$action" = "down" ] || exit 0
+
+line=`ip addr show $interface`
+addr=`echo $line | grep -Po 'inet \K[\d.]+'`
+bcast=`echo $line |  grep -Po 'brd \K[\d.]+'`
+[ -z "$addr" -o -z "$bcast" ] && return 1
+
+if [ "$action" = "up" ]
+then
+    iptables -t nat -A PREROUTING -d $addr -p udp --dport $PORT -j DNAT --to-destination $bcast
+elif [ "$action" = "down" ]
+then
+    iptables -t nat -D PREROUTING -d $addr -p udp --dport $PORT -j DNAT --to-destination $bcast
+fi
+
+exit 0
